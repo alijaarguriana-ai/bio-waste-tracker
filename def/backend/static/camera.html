@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bio Waste Tracker · Camera AI</title>
+<style>
+  body { margin: 0; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f3f4f1; color: #0b0b0b; }
+  header { display: flex; gap: 12px; align-items: center; padding: 12px 20px; background: #fcfcfb; border-bottom: 1px solid #e3e3de; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; } h1 span { color: #127a5c; }
+  select, button, input { font: inherit; font-size: 14px; }
+  button { border: 1px solid #e3e3de; background: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #85847f; display: inline-block; margin-right: 6px; }
+  .dot.on { background: #1baf7a; }
+  main { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px; }
+  .card { background: #fcfcfb; border: 1px solid #e3e3de; border-radius: 12px; padding: 14px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #52514e; margin: 0 0 10px; }
+  .stage { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+  video { width: 100%; display: block; }
+  #crop { position: absolute; border: 3px solid #1baf7a; box-shadow: 0 0 0 9999px rgba(0,0,0,.45); pointer-events: none; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pair img { width: 100%; border-radius: 6px; background: #ddd; aspect-ratio: 1; object-fit: cover; }
+  .pair div { font-size: 12px; color: #52514e; }
+  .result { font-size: 26px; font-weight: 700; margin: 12px 0 2px; }
+  .muted { color: #85847f; font-size: 13px; }
+  .log { font-size: 13px; max-height: 220px; overflow: auto; margin-top: 8px; }
+  .log div { padding: 4px 0; border-bottom: 1px solid #eee; }
+  .priv { font-size: 12px; color: #52514e; background: #eef6f2; border-radius: 8px; padding: 8px 10px; margin-top: 12px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bio Waste <span>Camera AI</span></h1>
+  <select id="cams"><option>Loading cameras…</option></select>
+  <span><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+  <span class="muted" id="st"></span>
+</header>
+<main>
+  <div class="card">
+    <h2>Live view (only the green square is analysed)</h2>
+    <div class="stage" id="stage"><video id="v" autoplay playsinline muted></video><div id="crop"></div></div>
+    <div class="row">
+      <label>Crop size <input type="range" id="size" min="30" max="100" value="70"></label>
+      <button id="ref">Take new reference (container as it is now)</button>
+      <button id="scan" style="background:#127a5c;color:#fff;border-color:#127a5c">Scan now (test, no scale)</button>
+    </div>
+    <div class="priv">Privacy: frames are cropped to the container, analysed by the local model on this laptop and never stored. Point the camera at the container only, not at people.</div>
+  </div>
+  <div class="card">
+    <h2>Last disposal</h2>
+    <div class="pair">
+      <div><img id="imgB" alt="before"><div>Before</div></div>
+      <div><img id="imgA" alt="after"><div>After</div></div>
+    </div>
+    <div class="result" id="res">Waiting for a disposal…</div>
+    <div class="muted" id="resSub">The scale triggers the photo automatically.</div>
+    <h2 style="margin-top:16px">Recognition log</h2>
+    <div class="log" id="log"></div>
+  </div>
+</main>
+<canvas id="cv" width="448" height="448" style="display:none"></canvas>
+<script>
+const $ = id => document.getElementById(id);
+const station = new URLSearchParams(location.search).get("station");   // null = all stations
+const v = $("v"), cv = $("cv"), ctx = cv.getContext("2d");
+let refFrame = null, stream = null, wsOpen = false, seen = null;
+const handled = new Set(), shown = new Set();
+
+function cropRect() {
+  const s = Math.min(v.videoWidth, v.videoHeight) * $("size").value / 100;
+  return { x: (v.videoWidth - s) / 2, y: (v.videoHeight - s) / 2, s };
+}
+function drawCrop() {
+  if (!v.videoWidth) return;
+  const r = cropRect(), k = v.clientWidth / v.videoWidth, c = $("crop");
+  c.style.left = r.x * k + "px"; c.style.top = r.y * k + "px";
+  c.style.width = r.s * k + "px"; c.style.height = r.s * k + "px";
+}
+function grab() {
+  const r = cropRect();
+  ctx.drawImage(v, r.x, r.y, r.s, r.s, 0, 0, cv.width, cv.height);
+  return cv.toDataURL("image/jpeg", 0.8);
+}
+function takeRef(msg) {
+  if (!v.videoWidth) return;
+  refFrame = grab(); $("imgB").src = refFrame;
+  $("st").textContent = msg || "Reference updated";
+}
+function logLine(t) {
+  const d = document.createElement("div"); d.textContent = new Date().toLocaleTimeString("de-DE") + "  " + t;
+  $("log").prepend(d);
+}
+
+async function startCam(id) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: id ? { deviceId: { exact: id } } : { width: 1280, height: 720 }, audio: false });
+  } catch (e) {
+    $("st").textContent = "Camera blocked: open this page on the laptop at http://localhost:8000/camera (browsers allow cameras only on localhost or HTTPS).";
+    return;
+  }
+  v.srcObject = stream;
+  v.onloadedmetadata = () => { drawCrop(); setTimeout(() => takeRef("Reference taken"), 800); };
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  const cur = stream.getVideoTracks()[0].getSettings().deviceId;
+  $("cams").innerHTML = devs.map((d, i) => `<option value="${d.deviceId}" ${d.deviceId === cur ? "selected" : ""}>${d.label || "Camera " + (i + 1)}</option>`).join("");
+}
+$("cams").onchange = e => startCam(e.target.value);
+$("size").oninput = () => { drawCrop(); };
+$("size").onchange = () => takeRef("Crop changed: new reference");
+$("ref").onclick = () => takeRef("Reference taken manually");
+window.addEventListener("resize", drawCrop);
+$("scan").onclick = async () => {
+  if (!v.videoWidth) { $("res").textContent = "No camera image"; return; }
+  const img = grab(); $("imgA").src = img;
+  $("res").textContent = "Analysing…"; $("resSub").textContent = "test scan, local model";
+  const t0 = Date.now();
+  try {
+    const r = await fetch("/api/vision-test", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ image: img }) }).then(x => x.json());
+    if (!r.ok) { $("res").textContent = "AI error"; $("resSub").textContent = r.error; return; }
+    $("res").textContent = `${r.food} · ${Math.round(r.confidence * 100)}%`;
+    $("resSub").textContent = `"${r.seen}" · ${((Date.now() - t0) / 1000).toFixed(1)}s`;
+    logLine(`test scan → ${r.food} (${Math.round(r.confidence * 100)}%)`);
+  } catch (e) { $("res").textContent = "Backend not reachable"; }
+};
+
+function showVision(e, r) {
+  if (shown.has(e.event_id)) return; shown.add(e.event_id);
+  $("res").textContent = `${r.food} · ${Math.round(r.confidence * 100)}%`;
+  $("resSub").textContent = `${Math.round(e.weight_g)} g · ${e.type.replace("_", " ")}${r.seen ? ' · "' + r.seen + '"' : ""}${r.seconds ? " · " + r.seconds + "s" : ""}`;
+  logLine(`${Math.round(e.weight_g)} g → ${r.food} (${Math.round(r.confidence * 100)}%)`);
+}
+async function onDisposal(ev) {
+  if (handled.has(ev.event_id)) return; handled.add(ev.event_id);
+  if (!refFrame) takeRef();
+  await new Promise(r => setTimeout(r, 300));
+  const after = grab();
+  $("imgB").src = refFrame; $("imgA").src = after;
+  $("res").textContent = "Analysing…";
+  $("resSub").textContent = `${Math.round(ev.weight_g)} g · ${ev.type.replace("_", " ")} · local model`;
+  try {
+    await fetch(`/api/events/${encodeURIComponent(ev.event_id)}/image`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ before: refFrame, after }) });
+  } catch (e) { $("res").textContent = "Backend not reachable"; }
+  refFrame = after;                       // next disposal compares against this
+}
+
+function connect() {
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onopen = () => { wsOpen = true; $("dot").classList.add("on"); $("conn").textContent = "live"; };
+  ws.onclose = () => { wsOpen = false; $("dot").classList.remove("on"); $("conn").textContent = "polling (no live link)"; setTimeout(connect, 3000); };
+  ws.onmessage = m => {
+    const d = JSON.parse(m.data);
+    if (d.type === "event" && (!station || d.event.station_id === station)) {
+      if (d.event.kind === "disposal") onDisposal(d.event);
+      if (d.event.kind === "empty") setTimeout(() => takeRef("Container emptied: new reference"), 1500);
+    }
+    if (d.type === "event_updated" && d.vision) showVision(d.event, d.vision);
+    if (d.type === "vision_error") { $("res").textContent = "AI error"; $("resSub").textContent = d.error; logLine("error: " + d.error); }
+  };
+  setInterval(() => ws.readyState === 1 && ws.send("ping"), 20000);
+}
+async function poll() {                    // fallback when the WebSocket is down
+  if (wsOpen) return;
+  try {
+    const evs = await fetch("/api/events").then(r => r.json());
+    if (seen === null) { seen = new Set(evs.map(e => e.event_id)); return; }
+    for (const e of evs) {
+      if (station && e.station_id !== station) continue;
+      if (!seen.has(e.event_id)) {
+        seen.add(e.event_id);
+        if (e.kind === "disposal") onDisposal(e);
+        if (e.kind === "empty") setTimeout(() => takeRef("Container emptied: new reference"), 1500);
+      }
+      if (e.food_item && handled.has(e.event_id)) showVision(e, { food: e.food_item, confidence: e.food_confidence || 0 });
+    }
+  } catch (_) {}
+}
+setInterval(poll, 1500);
+startCam(); connect();
+</script>
+</body>
+</html>

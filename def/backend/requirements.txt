@@ -1,0 +1,3 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+tzdata  # needed on Windows for zoneinfo

@@ -1,0 +1,10 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    volumes: ["bwt-data:/data"]
+    environment:
+      - BWT_TZ=Europe/Berlin
+    restart: unless-stopped
+volumes:
+  bwt-data:

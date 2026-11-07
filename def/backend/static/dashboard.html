@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bio Waste Tracker · Live</title>
+<style>
+  :root {
+    --surface-0: #f3f4f1; --surface-1: #fcfcfb; --border: #e3e3de;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #85847f;
+    --brand: #127a5c;
+    --series-prep: #2a78d6; --series-spoiled: #eb6834; --series-plate: #1baf7a;
+    --warn: #b26b00; --bad: #c0362c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--surface-0); color: var(--text-primary); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px;
+           background: var(--surface-1); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 20px; margin: 0; }
+  header h1 span { color: var(--brand); }
+  .sub { color: var(--text-secondary); font-size: 14px; }
+  .spacer { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); }
+  .live.on .dot { background: #1baf7a; box-shadow: 0 0 0 3px #1baf7a33; }
+  .btn { border: 1px solid var(--border); background: var(--surface-1); padding: 7px 12px; border-radius: 8px;
+         font: inherit; font-size: 13px; cursor: pointer; color: var(--text-primary); text-decoration: none; }
+  .btn:hover { border-color: var(--text-muted); }
+  main { padding: 20px 24px 40px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary);
+             margin: 0 0 12px; font-weight: 600; }
+  .kpi { grid-column: span 3; }
+  .kpi .v { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .kpi .u { font-size: 16px; color: var(--text-secondary); font-weight: 500; margin-left: 4px; }
+  .kpi .n { font-size: 13px; color: var(--text-muted); }
+  .types { grid-column: span 5; }
+  .action { grid-column: span 7; background: #0f5f48; color: #fff; border: none; }
+  .action h2 { color: #cdeee2; }
+  .action .head { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .action .do { font-size: 19px; line-height: 1.45; background: #ffffff1a; border-radius: 10px; padding: 12px 14px; }
+  .action .why { margin-top: 10px; color: #d6efe6; font-size: 14px; }
+  .action .save { margin-top: 10px; font-size: 14px; color: #fff; }
+  .action .save b { font-size: 18px; }
+  .hours { grid-column: span 8; }
+  .quality { grid-column: span 4; }
+  .log { grid-column: span 12; }
+  .ai { grid-column: span 12; }
+  .ai .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ai .top h2 { margin: 0; }
+  .ai .meta { font-size: 12px; color: var(--text-muted); }
+  .ai .head { font-size: 20px; font-weight: 700; margin: 14px 0 6px; }
+  .ai .diag { color: var(--text-secondary); margin: 0 0 12px; }
+  .ai ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+  .ai li b { display: block; }
+  .ai li .when { font-size: 12px; color: var(--brand); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .ai li .imp { font-size: 13px; color: var(--text-muted); }
+  .ai .owner { margin-top: 14px; border-left: 3px solid var(--brand); padding: 6px 12px; background: var(--surface-0); }
+  .ai .dq { margin-top: 10px; font-size: 13px; color: var(--text-muted); }
+  .ai .err { margin-top: 12px; color: var(--bad); font-size: 14px; }
+  .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .row { display: grid; grid-template-columns: 130px 1fr 200px; align-items: center; gap: 10px; margin: 10px 0; }
+  .row .name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .track { height: 22px; background: var(--surface-0); border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 0 4px 4px 0; transition: width .5s ease; min-width: 0; }
+  .row .val { font-variant-numeric: tabular-nums; font-size: 14px; text-align: right; }
+  .row .val b { font-size: 15px; }
+  .row .val span { color: var(--text-secondary); }
+  .share { display: flex; height: 10px; gap: 2px; margin-top: 14px; border-radius: 4px; overflow: hidden; }
+  .share div { transition: flex-grow .5s ease; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  svg text { fill: var(--text-muted); font-size: 11px; }
+  .tip { position: fixed; pointer-events: none; background: #0b0b0b; color: #fff; font-size: 12px; padding: 7px 9px;
+         border-radius: 6px; opacity: 0; transition: opacity .1s; z-index: 10; white-space: nowrap; }
+  .q { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; font-size: 14px; }
+  .q .k { color: var(--text-secondary); }
+  .q .v { font-variant-numeric: tabular-nums; text-align: right; font-weight: 600; }
+  .meter { height: 8px; background: var(--surface-0); border-radius: 4px; margin: 4px 0 12px; overflow: hidden; }
+  .meter div { height: 100%; background: var(--brand); border-radius: 4px; transition: width .5s; }
+  .q .note { grid-column: span 2; font-size: 12px; color: var(--text-muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary);
+       font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-1); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  td.num { text-align: right; }
+  .scroll { max-height: 380px; overflow: auto; }
+  tr.muted td { color: var(--text-muted); }
+  tr.new { animation: flash 2.5s ease-out; }
+  @keyframes flash { 0% { background: #fff3b0; } 100% { background: transparent; } }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 10px;
+           background: var(--surface-0); color: var(--text-secondary); border: 1px solid var(--border); }
+  .badge.rejected, .badge.fault, .badge.overload { color: var(--bad); border-color: #e9c1bd; background: #fdf1f0; }
+  .badge.empty { color: var(--warn); border-color: #ecd6b0; background: #fdf6ea; }
+  .badge.low { color: var(--warn); }
+  .toast { position: fixed; right: 24px; bottom: 24px; background: #0b0b0b; color: #fff; padding: 14px 18px;
+           border-radius: 12px; font-size: 16px; transform: translateY(200%); opacity: 0; transition: transform .3s, opacity .3s; z-index: 20; }
+  .toast.show { transform: none; opacity: 1; }
+  @media (max-width: 1100px) { .kpi { grid-column: span 6; } .types, .action, .hours, .quality { grid-column: span 12; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bio Waste <span>Tracker</span></h1>
+  <div class="sub" id="sub">Kitchen bin · today</div>
+  <div class="spacer"></div>
+  <div class="live" id="live"><span class="dot"></span><span id="liveTxt">connecting…</span></div>
+  <a class="btn" id="csv" href="/api/export.csv">Export raw log (CSV)</a>
+</header>
+
+<main>
+  <div class="card kpi"><h2>Food waste today</h2><div><span class="v" id="kTotal">0</span><span class="u">kg</span></div><div class="n" id="kTotalN">0 disposals</div></div>
+  <div class="card kpi"><h2>Value lost</h2><div><span class="v" id="kEur">0</span><span class="u">€</span></div><div class="n">purchase value, assumed €/kg per type</div></div>
+  <div class="card kpi"><h2>Climate impact</h2><div><span class="v" id="kCo2">0</span><span class="u">kg CO₂e</span></div><div class="n">≈ 2.5 kg CO₂e per kg food waste</div></div>
+  <div class="card kpi"><h2>Typed by a cook</h2><div><span class="v" id="kQual">–</span><span class="u">%</span></div><div class="n">button or tablet, rest = time rule</div></div>
+
+  <div class="card types">
+    <h2>Today by type</h2>
+    <div id="typeRows"></div>
+    <div class="share" id="share"></div>
+  </div>
+
+  <div class="card action">
+    <h2>The one action for tomorrow morning</h2>
+    <div class="head" id="aHead">Waiting for data…</div>
+    <div class="do" id="aDo">Tip the first waste onto the tray and press a type button.</div>
+    <div class="why" id="aWhy"></div>
+    <div class="save" id="aSave"></div>
+  </div>
+
+  <div class="card hours">
+    <h2>When the waste happens (grams per hour)</h2>
+    <div class="legend" id="hLegend"></div>
+    <svg id="hours" width="100%" height="220" role="img" aria-label="Waste per hour, stacked by type"></svg>
+  </div>
+
+  <div class="card quality">
+    <h2>Honest accuracy</h2>
+    <div class="q" id="quality"></div>
+  </div>
+
+  <div class="card ai">
+    <div class="top">
+      <h2>AI daily report for the owner</h2>
+      <button class="btn primary" id="aiBtn">Generate daily report</button>
+      <span class="meta" id="aiMeta">Local model via Ollama · runs on this laptop · no data leaves the kitchen</span>
+    </div>
+    <div id="aiBody"></div>
+  </div>
+
+  <div class="card log">
+    <h2>Raw log, every event including failures</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Event</th><th class="num">Weight (g)</th><th>Type</th><th>Typed by</th><th class="num">Confidence</th><th>Food (camera AI)</th><th>Station</th><th>Note</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TYPES = ["preparation_waste", "spoiled_stock", "plate_leftovers"];
+const LABEL = { preparation_waste: "Preparation", spoiled_stock: "Spoiled stock", plate_leftovers: "Plate leftovers" };
+const COLOR = { preparation_waste: "var(--series-prep)", spoiled_stock: "var(--series-spoiled)", plate_leftovers: "var(--series-plate)" };
+const SRC = { button: "Button", tablet: "Tablet", time_rule: "Time rule", sensor: "Sensor" };
+let events = [], summary = null, ws = null, pingTimer = null, pollTimer = null;
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 0) => Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderKpis(s) {
+  $("kTotal").textContent = fmt(s.total_g / 1000, 2);
+  $("kTotalN").textContent = `${s.disposals} disposal${s.disposals === 1 ? "" : "s"}`;
+  $("kEur").textContent = fmt(s.eur_total, 2);
+  $("kCo2").textContent = fmt(s.co2e_kg, 2);
+  $("kQual").textContent = s.disposals ? fmt(s.quality.button_or_tablet_pct, 0) : "–";
+  $("sub").textContent = `All stations · ${s.day}`;
+  $("csv").href = `/api/export.csv?day=${s.day}`;
+}
+
+function topFood(s, t) {
+  const f = (s.food_g || {})[t] || {}, k = Object.keys(f).sort((a, b) => f[b] - f[a]);
+  return k.length ? `<div style="font-size:12px;color:var(--text-muted)">mostly ${esc(k[0])}${k[1] ? ", " + esc(k[1]) : ""}</div>` : "";
+}
+function renderTypes(s) {
+  const max = Math.max(1, ...TYPES.map(t => s.totals_g[t]));
+  $("typeRows").innerHTML = TYPES.map(t => `
+    <div class="row">
+      <div class="name"><span class="sw" style="background:${COLOR[t]}"></span>${LABEL[t]}</div>
+      <div class="track"><div class="fill" style="width:${100 * s.totals_g[t] / max}%;background:${COLOR[t]}"></div></div>
+      <div class="val"><b>${fmt(s.totals_g[t])} g</b> <span>· ${fmt(s.percent[t], 1)}% · ${s.counts[t]}×</span>${topFood(s, t)}</div>
+    </div>`).join("");
+  $("share").innerHTML = s.total_g ? TYPES.filter(t => s.totals_g[t] > 0)
+    .map(t => `<div title="${LABEL[t]} ${fmt(s.percent[t], 1)}%" style="flex-grow:${s.totals_g[t]};background:${COLOR[t]}"></div>`).join("") : "";
+}
+
+function renderAction(s) {
+  const i = s.insight;
+  $("aHead").textContent = i.headline;
+  $("aDo").textContent = i.action;
+  $("aWhy").textContent = i.why;
+  $("aSave").innerHTML = i.saving_eur_year ? `Estimated saving if applied every day: <b>≈ €${fmt(i.saving_eur_year)}</b> per year for this bin` : "";
+}
+
+function renderHours(s) {
+  $("hLegend").innerHTML = TYPES.map(t => `<span><span class="sw" style="background:${COLOR[t]}"></span>${LABEL[t]}</span>`).join("");
+  const svg = $("hours"), W = svg.clientWidth || 700, H = 220, padL = 44, padB = 22, padT = 8;
+  let h0 = 6, h1 = 23;                                    // kitchen day, widened if data falls outside
+  TYPES.forEach(t => s.by_hour_g[t].forEach((v, h) => { if (v > 0) { h0 = Math.min(h0, h); h1 = Math.max(h1, h); } }));
+  const hrs = []; for (let h = h0; h <= h1; h++) hrs.push(h);
+  const tot = hrs.map(h => TYPES.reduce((a, t) => a + s.by_hour_g[t][h], 0));
+  const maxV = Math.max(100, ...tot);
+  const step = maxV > 2000 ? 1000 : maxV > 800 ? 500 : maxV > 400 ? 200 : 100;
+  const top = Math.ceil(maxV / step) * step;
+  const y = v => padT + (H - padT - padB) * (1 - v / top);
+  const bw = (W - padL) / hrs.length, barW = Math.max(6, Math.min(28, bw * 0.6));
+  let out = "";
+  for (let v = 0; v <= top; v += step)
+    out += `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#e3e3de" stroke-width="1"/>
+            <text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  hrs.forEach((h, i) => {
+    const cx = padL + bw * i + bw / 2;
+    if (i % 2 === 0 || hrs.length < 12) out += `<text x="${cx}" y="${H - 6}" text-anchor="middle">${h}h</text>`;
+    let base = 0;
+    const segs = TYPES.filter(t => s.by_hour_g[t][h] > 0);
+    segs.forEach((t, k) => {
+      const v = s.by_hour_g[t][h], y1 = y(base + v), y0 = y(base);
+      const gap = k > 0 ? 2 : 0, ht = Math.max(1, y0 - y1 - gap), isTop = k === segs.length - 1;
+      out += isTop
+        ? `<path d="M${cx - barW / 2},${y0 - gap} V${y1 + 4} a4,4 0 0 1 4,-4 H${cx + barW / 2 - 4} a4,4 0 0 1 4,4 V${y0 - gap} Z" fill="${COLOR[t]}"/>`
+        : `<rect x="${cx - barW / 2}" y="${y1}" width="${barW}" height="${ht}" fill="${COLOR[t]}"/>`;
+      base += v;
+    });
+    out += `<rect class="hit" data-h="${h}" x="${padL + bw * i}" y="${padT}" width="${bw}" height="${H - padT - padB}" fill="transparent"/>`;
+  });
+  svg.innerHTML = out;
+  const tip = $("tip");
+  svg.querySelectorAll(".hit").forEach(r => {
+    r.addEventListener("mousemove", e => {
+      const h = +r.dataset.h, total = TYPES.reduce((a, t) => a + s.by_hour_g[t][h], 0);
+      tip.innerHTML = `<b>${h}:00–${h + 1}:00</b> · ${fmt(total)} g<br>` +
+        TYPES.map(t => `${LABEL[t]}: ${fmt(s.by_hour_g[t][h])} g`).join("<br>");
+      tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY + 14) + "px"; tip.style.opacity = 1;
+    });
+    r.addEventListener("mouseleave", () => tip.style.opacity = 0);
+  });
+}
+
+function renderQuality(s) {
+  const q = s.quality, src = q.type_sources, o = q.non_disposal_events;
+  $("quality").innerHTML = `
+    <div class="k">Disposals typed by button / tablet</div><div class="v">${(src.button || 0) + (src.tablet || 0)} / ${s.disposals}</div>
+    <div style="grid-column:span 2" class="meter"><div style="width:${q.button_or_tablet_pct}%"></div></div>
+    <div class="k">Typed by time rule (cook forgot)</div><div class="v">${src.time_rule || 0}</div>
+    <div class="k">Rejected (bump / lean, not stored as waste)</div><div class="v">${o.rejected}</div>
+    <div class="k">Tray emptied / negative steps</div><div class="v">${o.empty}</div>
+    <div class="k">Overload warnings (&gt; 4.5 kg)</div><div class="v">${o.overload}</div>
+    <div class="k">Sensor faults</div><div class="v">${o.fault}</div>
+    <div class="k">Timestamps reconstructed (offline)</div><div class="v">${q.ts_estimated}</div>
+    <div class="note">Every event the device sends is kept. Only "disposal" rows count towards totals.</div>`;
+}
+
+function rowHtml(e, isNew) {
+  const t = new Date(e.ts * 1000).toLocaleTimeString("de-DE");
+  const muted = e.kind !== "disposal";
+  const conf = e.kind === "disposal" ? `<span class="${e.confidence < 0.8 ? "badge low" : ""}">${fmt(e.confidence, 2)}</span>` : "";
+  return `<tr class="${muted ? "muted" : ""} ${isNew ? "new" : ""}" data-id="${esc(e.event_id)}">
+    <td>${t}${e.ts_estimated ? " *" : ""}</td>
+    <td><span class="badge ${esc(e.kind)}">${esc(e.kind)}</span></td>
+    <td class="num">${fmt(e.weight_g, 1)}</td>
+    <td>${e.type ? `<span class="sw" style="display:inline-block;vertical-align:-1px;background:${COLOR[e.type]}"></span> ${LABEL[e.type]}` : "–"}</td>
+    <td>${SRC[e.type_source] || esc(e.type_source)}</td>
+    <td class="num">${conf}</td>
+    <td>${e.food_item ? `${esc(e.food_item)} <span class="${e.food_confidence < 0.6 ? "badge low" : ""}">${Math.round((e.food_confidence || 0) * 100)}%</span>` : (e.kind === "disposal" ? "–" : "")}</td>
+    <td>${esc(e.station_id)}</td>
+    <td>${esc(e.note)}</td></tr>`;
+}
+
+function renderLog(newId) {
+  $("logBody").innerHTML = events.slice().reverse().map(e => rowHtml(e, e.event_id === newId)).join("")
+    || `<tr><td colspan="9" style="color:var(--text-muted)">No events yet today.</td></tr>`;
+}
+
+function renderAll(newId) {
+  if (!summary) return;
+  renderKpis(summary); renderTypes(summary); renderAction(summary); renderHours(summary); renderQuality(summary); renderLog(newId);
+}
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+function upsert(e) {
+  const i = events.findIndex(x => x.event_id === e.event_id);
+  if (i >= 0) events[i] = e; else events.push(e);
+  events.sort((a, b) => a.ts - b.ts);
+}
+
+function onMessage(m) {
+  if (m.type === "ai_insight") { if (m.day === summary?.day) renderAI(m.insight); return; }
+  if (m.type === "snapshot") { events = m.events; summary = m.summary; renderAll(); }
+  else if (m.type === "event" || m.type === "event_updated") {
+    if (m.event.day !== summary?.day) return;
+    upsert(m.event); summary = m.summary; renderAll(m.event.event_id);
+    if (m.vision) toast(`Camera AI: ${m.vision.food} (${Math.round(m.vision.confidence * 100)}%) · ${fmt(m.event.weight_g)} g`);
+    else if (m.event.kind === "disposal")
+      toast(`${m.type === "event" ? "New disposal" : "Type corrected"}: ${fmt(m.event.weight_g)} g · ${LABEL[m.event.type]}`);
+    else if (m.type === "event") toast(`Logged: ${m.event.kind} (${m.event.note || "no note"})`);
+  }
+}
+
+async function poll() {           // fallback when the WebSocket is down
+  try {
+    const [ev, s] = await Promise.all([fetch("/api/events").then(r => r.json()), fetch("/api/summary").then(r => r.json())]);
+    events = ev; summary = s; renderAll();
+  } catch (_) {}
+}
+
+function setLive(on, txt) { $("live").classList.toggle("on", on); $("liveTxt").textContent = txt; }
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    setLive(true, "live"); clearInterval(pollTimer); pollTimer = null;
+    clearInterval(pingTimer); pingTimer = setInterval(() => ws.readyState === 1 && ws.send("ping"), 20000);
+  };
+  ws.onmessage = e => onMessage(JSON.parse(e.data));
+  ws.onclose = () => {
+    setLive(false, "reconnecting… (polling)"); clearInterval(pingTimer);
+    if (!pollTimer) { poll(); pollTimer = setInterval(poll, 3000); }   // keep data flowing without WS
+    setTimeout(connect, 3000);
+  };
+}
+
+function renderAI(r) {
+  if (!r || !r.ok) { $("aiBody").innerHTML = `<div class="err">${esc(r && r.error || "AI not available")}</div>`; return; }
+  $("aiMeta").textContent = `${r.model} · ${r.seconds}s · based on ${r.based_on_disposals} disposals · runs locally, no data leaves the kitchen`;
+  $("aiBody").innerHTML = `
+    <div class="head">${esc(r.headline)}</div>
+    <p class="diag">${esc(r.diagnosis)}</p>
+    ${r.food_summary ? `<p class="diag"><b style="color:var(--text-primary)">Food (camera AI):</b> ${esc(r.food_summary)}</p>` : ""}
+    <ol>${r.actions.map(a => `<li><span class="when">${esc(a.when)}</span><b>${esc(a.title)}</b>${esc(a.how)}<div class="imp">${esc(a.expected_impact)}</div></li>`).join("")}</ol>
+    <div class="owner">${esc(r.owner_message)}</div>
+    <div class="dq">Data quality: ${esc(r.data_quality)}</div>`;
+}
+$("aiBtn").onclick = async () => {
+  const b = $("aiBtn"); b.disabled = true; b.textContent = "Thinking… (local model)";
+  try {
+    const r = await fetch(`/api/ai-insight?refresh=1${summary ? "&day=" + summary.day : ""}`).then(x => x.json());
+    renderAI(r);
+  } catch (e) { renderAI({ ok: false, error: "Backend not reachable" }); }
+  b.disabled = false; b.textContent = "Generate daily report";
+};
+window.addEventListener("resize", () => summary && renderHours(summary));
+connect();
+</script>
+</body>
+</html>

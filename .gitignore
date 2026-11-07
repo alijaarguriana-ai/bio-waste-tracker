@@ -1,0 +1,3 @@
+bwt.db
+*.db-*
+__pycache__/
