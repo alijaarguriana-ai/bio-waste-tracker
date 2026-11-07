@@ -52,11 +52,12 @@ Tuning knobs (all in `config.h`): `STABLE_MS` / `STABLE_BAND_G` (how still a pla
 
 ## 3. Backend + dashboard
 
-```bash
+```powershell
 cd backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+python -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\start.ps1   # sets AI model + camera, starts on port 8000
 ```
+Without the local AI: `python -m uvicorn main:app --host 0.0.0.0 --port 8000`. Local AI setup: see section 7.
 - Dashboard (projector): `http://<laptop-ip>:8000/`
 - Cook tablet / phone: `http://<laptop-ip>:8000/cook?station=bin-01`
 - D2 log export: `/api/export.csv` (all events) or `/api/export.csv?disposals_only=1`
@@ -98,28 +99,53 @@ Tested on a host simulator (the real sketch compiled against fake HX711/buttons/
 - [ ] Live: 3 disposals with 3 different types, one *without* pressing a button → show the time rule + tablet correction.
 - [ ] Backup video of a full cycle in case the hardware fails on stage.
 
-## 7. AI consultant (local LLM via Ollama)
-The dashboard card "AI consultant for the owner" sends today's summary + raw disposal log to a **local** model and shows a diagnosis, 3 concrete actions and a message for the owner. No data leaves the laptop.
+## 7. Local AI: one model, two jobs (Ollama + qwen3-vl:2b)
+Everything runs **on the laptop** through [Ollama](https://ollama.com). No image, number or log line leaves the kitchen.
+One small vision-language model, **`qwen3-vl:2b`**, does both jobs:
 
-```bash
-ollama list                      # check the exact model name, e.g. gemma3:4b
-ollama serve                     # usually already running in the background
-# optional overrides before starting the backend (PowerShell):
-#   $env:BWT_LLM_MODEL="gemma3:4b"; $env:BWT_AI_LANG="English"
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+| Job | Input | Output |
+|---|---|---|
+| Food recognition (camera AI) | BEFORE + AFTER photo of the container | `food_item` + `food_confidence`, saved on the disposal record |
+| Owner report (AI consultant) | numbers computed by the backend + raw disposal log | headline, diagnosis, food summary, 3 actions, message for the owner |
+
+Setup (once, PowerShell):
+```powershell
+winget install Ollama.Ollama      # then reopen PowerShell
+ollama pull qwen3-vl:2b           # ~2 GB
+ollama list                       # must show qwen3-vl:2b
 ```
-The model only receives numbers computed by the backend and is told never to invent figures or food names. The rule-based action card stays as the deterministic fallback when the LLM is off.
+Start the backend with `backend/start.ps1`. It sets the model and the camera:
+```powershell
+cd backend
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+| Variable | Value in start.ps1 | Meaning |
+|---|---|---|
+| `BWT_LLM_MODEL` | `qwen3-vl:2b` | model for the owner report |
+| `BWT_VISION_MODEL` | `qwen3-vl:2b` | model for food recognition (`gemma3:4b` works as a fallback) |
+| `BWT_CAM_URL` | `http://172.20.10.3:8080/shot.jpg` | IP Webcam snapshot URL on the phone |
+| `BWT_AI_LANG` | `English` (default) | language of the report |
+| `BWT_AUTO_INSIGHT` | `1` (default) | `0` = report only on button press |
+| `BWT_AUTO_INSIGHT_DELAY` | `8` s (default) | wait for more disposals before regenerating |
 
-## 8. Camera food recognition (phone camera + local vision model)
-1. Phone as webcam for the laptop (Iriun Webcam app on phone + Iriun on Windows, same Wi-Fi).
-2. On the laptop open `http://localhost:8000/camera` (cameras only work on localhost/HTTPS), pick "Iriun Webcam", adjust the green square to cover only the container.
-3. On every disposal the page sends a BEFORE and AFTER crop to `POST /api/events/{id}/image`; the backend asks the local model (gemma3:4b, vision) what was ADDED and stores `food_item` + `food_confidence`. Images are never stored.
-4. Food list: env `BWT_FOODS` (default apple,pasta,bread,vegetables,potatoes,rice,meat,fish,salad,mixed,other,nothing).
+**Automatic report.** After every disposal, as soon as its food is recognised, the backend regenerates the owner report and pushes it to every open dashboard. Several quick disposals trigger one run, and two runs never overlap. The "Generate daily report" button still forces a fresh run.
+
+**Honesty rules.** The model only receives numbers computed by the backend and is told never to invent figures or food names. qwen3's "thinking" mode is switched off (faster, clean JSON). The rule-based action card stays as the deterministic fallback when Ollama is off.
+
+## 8. Camera food recognition: Android "IP Webcam" (main setup)
+1. Install "IP Webcam" on an Android phone, join the same hotspot, set video resolution to **640×480** (faster inference), tap "Start server". It shows an address like `http://172.20.10.3:8080`.
+2. Mount the phone above the container so the picture shows **only the container** (no faces, no hands at rest).
+3. Start the backend with `start.ps1` (the URL is set there; change it if the phone's IP differs).
+4. With the container empty open `http://localhost:8000/api/camera/reference` once (takes the BEFORE photo). After every `empty` event a new reference is taken automatically.
+5. Quick test without the scale: point the camera at some food and open `http://localhost:8000/api/camera/test`.
+
+Flow per disposal: ESP32 posts the weight → backend pulls a snapshot → qwen3-vl compares BEFORE/AFTER → `food_item` is saved and the dashboard updates live → the owner report is regenerated. Photos stay in memory and are **never stored**.
+
+Food list: env `BWT_FOODS` (default apple,pasta,bread,vegetables,potatoes,rice,meat,fish,salad,mixed,other,nothing).
 Origin type still comes from button/tablet/time rule: the camera says WHAT, not WHERE FROM.
 
-### 8b. Alternative: Android "IP Webcam" app (no browser page needed)
-1. Install "IP Webcam" on an Android phone, connect it to the same hotspot, tap "Start server". It shows an address like `http://172.20.10.5:8080`.
-2. Start the backend with the snapshot URL (PowerShell, in `backend`):
-   `$env:BWT_CAM_URL="http://172.20.10.5:8080/shot.jpg"; python -m uvicorn main:app --host 0.0.0.0 --port 8000`
-3. With the container empty open `http://localhost:8000/api/camera/reference` once (takes the BEFORE photo).
-From then on every disposal pulls a photo from the phone and the local model fills `food_item`. Do not open /camera at the same time (it would analyse twice).
+### 8b. Alternative: browser camera page
+Use this only if `BWT_CAM_URL` is **not** set (otherwise every disposal is analysed twice).
+1. Phone as webcam for the laptop (e.g. Iriun Webcam on phone + Windows, same Wi-Fi).
+2. On the laptop open `http://localhost:8000/camera` (cameras only work on localhost/HTTPS), pick the camera, adjust the green square to cover only the container.
+3. On every disposal the page sends a BEFORE and AFTER crop to `POST /api/events/{id}/image`.
