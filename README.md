@@ -16,6 +16,18 @@ Every disposal **weighed, typed and timed**. ESP32 + 5 kg load cell under a weig
                                              Dashboard (projector)  ·  Cook tablet (/cook)
 ```
 
+## Project structure
+
+```
+backend/            FastAPI server, SQLite store, local LLM client
+  static/           dashboard, cook tablet and camera pages
+  start.ps1         one-click start on Windows
+firmware/
+  bio_waste_tracker/  ESP32 sketch + config.h (Wi-Fi, pins, tuning)
+tools/              ESP32 simulator and USB serial bridge
+docker-compose.yml  containerised backend
+```
+
 ## 1. Hardware wiring
 
 | Part | ESP32 pin |
