@@ -70,7 +70,9 @@ async def post_event(request: Request):
         return JSONResponse({"status": "duplicate", "event": ev}, status_code=409)
     await hub.broadcast({"type": "event", "event": ev, "summary": store.summary(ev["day"])})
     if CAM_URL:
-        _spawn(_cam_after_event(ev))
+        _spawn(_cam_after_event(ev))            # the report is refreshed after the food is recognised
+    elif ev["kind"] == "disposal":
+        _schedule_insight(ev["day"])
     return JSONResponse({"status": "stored", "event": ev}, status_code=201)
 
 
@@ -162,10 +164,12 @@ async def _cam_after_event(ev: dict):
     after = await asyncio.to_thread(_snapshot)
     if not after:
         await hub.broadcast({"type": "vision_error", "event_id": ev["event_id"], "error": "camera snapshot failed"})
+        _schedule_insight(ev["day"])
         return
     before = _cam_ref.get(st)
     _cam_ref[st] = after
     await _vision_job(ev["event_id"], before, after)
+    _schedule_insight(ev["day"])
 
 
 @app.get("/api/camera/reference")
@@ -235,7 +239,49 @@ async def camera(request: Request):
 
 
 # ------------------------------------------------------------ AI consultant
-_ai_cache: dict = {}   # day -> (number_of_events, result)
+_ai_cache: dict = {}   # day -> (fingerprint of the day's events, result)
+
+# Auto report: after every disposal (once its food is recognised) the owner report is regenerated.
+# Debounced: several quick disposals -> one run; never two runs at once.  BWT_AUTO_INSIGHT=0 disables.
+AUTO_INSIGHT = os.environ.get("BWT_AUTO_INSIGHT", "1") != "0"
+AUTO_INSIGHT_DELAY = float(os.environ.get("BWT_AUTO_INSIGHT_DELAY", "8"))
+_insight_state = {"task": None, "again": False}
+
+
+def _fingerprint(events: list[dict]) -> tuple:
+    return tuple((e["event_id"], e["type"], e.get("food_item")) for e in events)
+
+
+def _schedule_insight(day: str):
+    if not AUTO_INSIGHT:
+        return
+    st = _insight_state
+    if st["task"] and not st["task"].done():
+        st["again"] = True                       # a run is waiting/running: redo once after it
+        return
+    st["task"] = asyncio.create_task(_auto_insight(day))
+
+
+async def _auto_insight(day: str):
+    st = _insight_state
+    while True:
+        st["again"] = False
+        await asyncio.sleep(AUTO_INSIGHT_DELAY)
+        if st["again"]:
+            continue                             # more disposals came in: keep waiting
+        await _run_insight(day)
+        if not st["again"]:
+            return
+
+
+async def _run_insight(day: str) -> dict:
+    events = store.events(day)
+    await hub.broadcast({"type": "ai_status", "day": day, "status": "thinking"})
+    result = await asyncio.to_thread(llm.generate, store.summary(day), events)
+    if result.get("ok"):
+        _ai_cache[day] = (_fingerprint(events), result)
+    await hub.broadcast({"type": "ai_insight", "day": day, "insight": result})
+    return result
 
 
 @app.get("/api/ai-insight")
@@ -244,12 +290,9 @@ async def ai_insight(request: Request):
     day = request.query_params.get("day") or today()
     events = store.events(day)
     cached = _ai_cache.get(day)
-    if cached and cached[0] == len(events) and request.query_params.get("refresh") != "1":
+    if cached and cached[0] == _fingerprint(events) and request.query_params.get("refresh") != "1":
         return JSONResponse({**cached[1], "cached": True})
-    result = await asyncio.to_thread(llm.generate, store.summary(day), events)
-    if result.get("ok"):
-        _ai_cache[day] = (len(events), result)
-        await hub.broadcast({"type": "ai_insight", "day": day, "insight": result})
+    result = await _run_insight(day)
     return JSONResponse(result, status_code=200 if result.get("ok") else 503)
 
 
@@ -259,6 +302,8 @@ async def ws_endpoint(websocket: WebSocket):
     hub.clients.add(websocket)
     day = today()
     await websocket.send_json({"type": "snapshot", "events": store.events(day), "summary": store.summary(day)})
+    if day in _ai_cache:                         # a freshly opened dashboard shows the latest report at once
+        await websocket.send_json({"type": "ai_insight", "day": day, "insight": _ai_cache[day][1]})
     try:
         while True:
             await websocket.receive_text()     # keep-alive pings from the browser

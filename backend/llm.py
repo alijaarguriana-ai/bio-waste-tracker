@@ -1,6 +1,6 @@
 """
 AI consultant: turns today's raw log into advice for the restaurant owner,
-using a LOCAL model through Ollama (default: gemma3:4b). No data leaves the laptop.
+using a LOCAL model through Ollama (start.ps1 uses qwen3-vl:2b). No data leaves the laptop.
 
 Config (environment variables, all optional):
   BWT_LLM_URL    default http://localhost:11434
@@ -153,6 +153,23 @@ def _clean(d) -> dict:
     }
 
 
+def _chat(body: dict, timeout: float) -> dict:
+    """POST to Ollama /api/chat. Asks qwen3-style models not to "think" first (faster, clean JSON);
+    retries without that flag if the installed Ollama/model rejects it."""
+    body = {**body, "think": False}
+    for attempt in (1, 2):
+        req = urllib.request.Request(f"{LLM_URL}/api/chat", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if attempt == 1 and e.code == 400 and "think" in e.read().decode(errors="replace").lower():
+                body.pop("think")
+                continue
+            raise
+
+
 def generate(summary: dict, events: list[dict], timeout: float = 180) -> dict:
     """Blocking call to Ollama. Returns {"ok": True, ...advice} or {"ok": False, "error": ...}."""
     if summary["disposals"] == 0:
@@ -166,11 +183,8 @@ def generate(summary: dict, events: list[dict], timeout: float = 180) -> dict:
         "options": {"temperature": 0.3},
     }
     t0 = time.time()
-    req = urllib.request.Request(f"{LLM_URL}/api/chat", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            resp = json.loads(r.read())
+        resp = _chat(body, timeout)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:300]
         hint = " Check the model name with `ollama list`." if e.code == 404 else ""
@@ -219,11 +233,8 @@ def classify_food(before_b64: str | None, after_b64: str, timeout: float = 120) 
         "options": {"temperature": 0.1},
     }
     t0 = time.time()
-    req = urllib.request.Request(f"{LLM_URL}/api/chat", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            resp = json.loads(r.read())
+        resp = _chat(body, timeout)
         d = _parse(resp["message"]["content"])
     except urllib.error.HTTPError as e:
         return {"ok": False, "error": f"Ollama returned {e.code}: {e.read().decode(errors='replace')[:200]}"}

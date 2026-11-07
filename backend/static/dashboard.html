@@ -304,6 +304,7 @@ function upsert(e) {
 
 function onMessage(m) {
   if (m.type === "ai_insight") { if (m.day === summary?.day) renderAI(m.insight); return; }
+  if (m.type === "ai_status") { if (m.day === summary?.day) $("aiMeta").textContent = "Updating the report with the latest disposals… (local model)"; return; }
   if (m.type === "snapshot") { events = m.events; summary = m.summary; renderAll(); }
   else if (m.type === "event" || m.type === "event_updated") {
     if (m.event.day !== summary?.day) return;
