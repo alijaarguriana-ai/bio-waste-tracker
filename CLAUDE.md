@@ -41,12 +41,14 @@ Recognising the food does NOT give the type (brief says so): the camera adds `fo
 
 ## Network (phone hotspot "iPhone di Ari")
 - Laptop: **172.20.10.2** (check with `ipconfig`, adapter "WiFi 2"). Android phone with **IP Webcam**: **172.20.10.3:8080**.
+  Phone and laptop must be on the same Wi-Fi; the laptop has a VPN (ProtonVPN, "ProTUN") that must be OFF.
 - Dashboard: laptop `http://localhost:8000` (never open 0.0.0.0), other devices `http://172.20.10.2:8000`,
   cook tablet `/cook`, browser camera page `/camera` (only if NOT using IP Webcam).
 
 ## Backend (FastAPI + SQLite + WebSocket), folder `backend/`
-- Start (PowerShell in backend): `powershell -ExecutionPolicy Bypass -File .\start.ps1` where start.ps1 sets
-  `BWT_LLM_MODEL=qwen3-vl:2b`, `BWT_VISION_MODEL=qwen3-vl:2b`, `BWT_CAM_URL=http://172.20.10.3:8080/shot.jpg`
+- Start (PowerShell in backend): `powershell -ExecutionPolicy Bypass -File .\start.ps1 -PhoneIp 172.20.10.3` where start.ps1 sets
+  `BWT_LLM_MODEL=qwen3-vl:2b-instruct`, `BWT_VISION_MODEL=qwen3-vl:2b-instruct`, `BWT_CAM_URL=http://<PhoneIp>:8080/shot.jpg`,
+  checks the camera ("Camera OK" green / warning yellow)
   and runs uvicorn on port 8000 with `C:\Python314\python.exe`.
 - **Python:** plain `python` in this terminal points to an unrelated virtualenv (`storefront`) without uvicorn.
   Always use `C:\Python314\python.exe` (start.ps1 already does).
@@ -59,8 +61,11 @@ Recognising the food does NOT give the type (brief says so): the camera adds `fo
   POST /api/events/{id}/image, POST /api/vision-test, GET /api/camera/test, GET /api/camera/reference, WS /ws.
 - IP Webcam flow: on each disposal the backend pulls a snapshot, compares with the BEFORE photo, sets
   `food_item` + `food_confidence`. Images never stored.
-- Local AI via Ollama: `qwen3-vl:2b` for both vision and report (gemma3:4b also installed as fallback;
-  qwen3-vl:8b download was interrupted). The LLM only gets numbers computed by the backend.
+- Local AI via Ollama: `qwen3-vl:2b-instruct` for both vision and report. Plain `qwen3-vl:2b` is the THINKING
+  variant: ignores think:false, ~4000 reasoning tokens, times out (laptop runs Ollama 100% CPU, ~20 tok/s).
+  Report auto-regenerates ~8 s after each recognised disposal (BWT_AUTO_INSIGHT, BWT_AUTO_INSIGHT_DELAY).
+  Ollama 0.40.15 installed via winget (Sat 05:00); on this laptop ONLY qwen3-vl models are pulled (no gemma3:4b).
+  The LLM only gets numbers computed by the backend.
 - `simulate_esp32.py --day` / `--live 5` uses station "sim-01": never hand in simulated data as D2.
 
 ## Repo layout (reorganized Sat 2026-11-07)

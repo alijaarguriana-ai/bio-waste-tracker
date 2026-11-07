@@ -99,9 +99,11 @@ Tested on a host simulator (the real sketch compiled against fake HX711/buttons/
 - [ ] Live: 3 disposals with 3 different types, one *without* pressing a button → show the time rule + tablet correction.
 - [ ] Backup video of a full cycle in case the hardware fails on stage.
 
-## 7. Local AI: one model, two jobs (Ollama + qwen3-vl:2b)
+## 7. Local AI: one model, two jobs (Ollama + qwen3-vl:2b-instruct)
 Everything runs **on the laptop** through [Ollama](https://ollama.com). No image, number or log line leaves the kitchen.
-One small vision-language model, **`qwen3-vl:2b`**, does both jobs:
+One small vision-language model, **`qwen3-vl:2b-instruct`**, does both jobs.
+Use the **instruct** tag: plain `qwen3-vl:2b` is the *thinking* variant, which ignores `think: false`, writes thousands of reasoning tokens and times out on a CPU-only laptop.
+
 
 | Job | Input | Output |
 |---|---|---|
@@ -111,19 +113,20 @@ One small vision-language model, **`qwen3-vl:2b`**, does both jobs:
 Setup (once, PowerShell):
 ```powershell
 winget install Ollama.Ollama      # then reopen PowerShell
-ollama pull qwen3-vl:2b           # ~2 GB
-ollama list                       # must show qwen3-vl:2b
+ollama pull qwen3-vl:2b-instruct  # ~2 GB
+ollama list                       # must show qwen3-vl:2b-instruct
 ```
 Start the backend with `backend/start.ps1`. It sets the model and the camera:
 ```powershell
 cd backend
-powershell -ExecutionPolicy Bypass -File .\start.ps1
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -PhoneIp 172.20.10.3   # IP shown by IP Webcam
 ```
+start.ps1 checks the phone camera first and prints "Camera OK" (green) or a warning (yellow).
 | Variable | Value in start.ps1 | Meaning |
 |---|---|---|
-| `BWT_LLM_MODEL` | `qwen3-vl:2b` | model for the owner report |
-| `BWT_VISION_MODEL` | `qwen3-vl:2b` | model for food recognition (`gemma3:4b` works as a fallback) |
-| `BWT_CAM_URL` | `http://172.20.10.3:8080/shot.jpg` | IP Webcam snapshot URL on the phone |
+| `BWT_LLM_MODEL` | `qwen3-vl:2b-instruct` | model for the owner report |
+| `BWT_VISION_MODEL` | `qwen3-vl:2b-instruct` | model for food recognition (`gemma3:4b` works as a fallback) |
+| `BWT_CAM_URL` | `http://<PhoneIp>:8080/shot.jpg` | IP Webcam snapshot URL (`-PhoneIp`, default 172.20.10.3) |
 | `BWT_AI_LANG` | `English` (default) | language of the report |
 | `BWT_AUTO_INSIGHT` | `1` (default) | `0` = report only on button press |
 | `BWT_AUTO_INSIGHT_DELAY` | `8` s (default) | wait for more disposals before regenerating |
@@ -135,9 +138,10 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1
 ## 8. Camera food recognition: Android "IP Webcam" (main setup)
 1. Install "IP Webcam" on an Android phone, join the same hotspot, set video resolution to **640×480** (faster inference), tap "Start server". It shows an address like `http://172.20.10.3:8080`.
 2. Mount the phone above the container so the picture shows **only the container** (no faces, no hands at rest).
-3. Start the backend with `start.ps1` (the URL is set there; change it if the phone's IP differs).
-4. With the container empty open `http://localhost:8000/api/camera/reference` once (takes the BEFORE photo). After every `empty` event a new reference is taken automatically.
-5. Quick test without the scale: point the camera at some food and open `http://localhost:8000/api/camera/test`.
+3. Laptop and phone must be on the **same Wi-Fi** and the laptop **VPN must be off**. Check by opening `http://<phone-ip>:8080/shot.jpg` in the laptop browser.
+4. Start the backend: `.\start.ps1 -PhoneIp <phone-ip>`.
+5. With the container empty open `http://localhost:8000/api/camera/reference` once (takes the BEFORE photo). After every `empty` event a new reference is taken automatically.
+6. Quick test without the scale: point the camera at some food and open `http://localhost:8000/api/camera/test`.
 
 Flow per disposal: ESP32 posts the weight → backend pulls a snapshot → qwen3-vl compares BEFORE/AFTER → `food_item` is saved and the dashboard updates live → the owner report is regenerated. Photos stay in memory and are **never stored**.
 
