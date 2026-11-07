@@ -1,7 +1,12 @@
-# Start the Bio Waste Tracker backend (run from anywhere).
-# Optional overrides before running:
-#   $env:BWT_LLM_MODEL = "gemma3:4b"; $env:BWT_AI_LANG = "English"
-#   $env:BWT_CAM_URL   = "http://172.20.10.5:8080/shot.jpg"
+# Bio Waste Tracker backend: powershell -ExecutionPolicy Bypass -File .\start.ps1
 Set-Location -Path $PSScriptRoot
-python -m pip install -r requirements.txt --quiet
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+$env:BWT_LLM_MODEL    = "qwen3-vl:2b"
+$env:BWT_VISION_MODEL = "qwen3-vl:2b"
+$env:BWT_CAM_URL      = "http://172.20.10.3:8080/shot.jpg"   # IP Webcam on the Android phone
+
+# Use the Python that has the dependencies (plain "python" may point to another virtualenv)
+$py = "C:\Python314\python.exe"
+if (-not (Test-Path $py)) { $py = "python" }
+
+& $py -m uvicorn main:app --host 0.0.0.0 --port 8000

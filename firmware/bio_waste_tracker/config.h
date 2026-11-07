@@ -7,10 +7,10 @@
 // ---------- Network ----------------------------------------------------
 // TIP: campus eduroam (WPA2-Enterprise) is painful on ESP32.
 // Use a phone hotspot or the laptop hotspot for the demo.
-#define WIFI_SSID        "BioWasteHotspot"
+#define WIFI_SSID        "iPhone di Ari"
 #define WIFI_PASSWORD    "changeme123"
 // Laptop IP on the hotspot network + backend port
-#define BACKEND_URL      "http://192.168.137.1:8000/api/events"
+#define BACKEND_URL      "http://172.20.10.2:8000/api/events"
 #define DEVICE_ID        "bin-01"          // becomes station_id
 #define TZ_INFO          "CET-1CEST,M3.5.0,M10.5.0/3"   // Europe/Berlin
 #define NTP_SERVER       "pool.ntp.org"
